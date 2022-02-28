@@ -3,88 +3,98 @@ import matplotlib.pyplot as plt
 import numpy as np
 from skimage import color
 
-def extractImages(videoPath, numOfFrames):
-    extractedFrames = []
-    vidcap = cv2.VideoCapture(videoPath)
-
-    fps = vidcap.get(cv2.CAP_PROP_FPS)
-    frame_count = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration = frame_count / fps
-    scope = round(duration)
-
-    success, frame = vidcap.read()
-    success = True
-    if not numOfFrames:
-        count = 1
-        while success:
-            vidcap.set(cv2.CAP_PROP_POS_MSEC,(count * 1000 - 500))
-            success, frame = vidcap.read()
-            if success:
-                extractedFrames.append(frame[...,::-1])
-            count = count + 1
-    else:
-        pass
-    return extractedFrames
-
-"""
-def toGrayscale(frames):
+def toGrayscaleAndNormalize(frames):
     numOfFrames = len(frames)
     framesInGrayscale = []
     for i in range(numOfFrames):
         frameInGrayscale = color.rgb2gray(frames[i])
         framesInGrayscale.append(frameInGrayscale)
     return framesInGrayscale
-"""
-
-def toGrayscale(frames):
-    numOfFrames = len(frames)
-    framesInGrayscale = []
-    for i in range(numOfFrames):
-        frameInGrayscale = cv2.cvtColor(frames[i], cv2.COLOR_BGR2GRAY)
-        framesInGrayscale.append(frameInGrayscale)
-    return framesInGrayscale
-
-def arrayToVector(frames):
-    numOfFrames = len(frames)
-    vectors = []
-    for i in range(numOfFrames):
-        vectors.append(frames[i].flatten())
-    return vectors
-
-def normalize(frames):
-    numOfFrames = len(frames)
-    normalizedFrames = []
-    I = frames[0].shape[0]
-    for k in range(numOfFrames):
-        Xmax = np.max(frames[k])
-        Xmin = np.min(frames[k])
-        normalizedFrame = np.empty((I))
-        for i in range(I):
-            normalizedFrame[i] = (frames[k][i] - Xmin) / (Xmax - Xmin)
-        normalizedFrames.append(normalizedFrame)
-    return normalizedFrames
 
 def measureDistance(frames):
     numOfFrames = len(frames)
     partial_d = []
-    I = frames[0].shape[0]
-    for k in range(numOfFrames - 1):
-        sum = 0
-        for i in range(I):
-            temp = abs(frames[k][i] - frames[k + 1][i])
-            sum += temp
-        partial_d.append(sum)
+    for i in range(numOfFrames - 1):
+        partial_d.append(np.mean(np.abs(frames[i] - frames[i + 1])))
+    #print(partial_d)
     return np.mean(partial_d)
 
-videoPath = 'film1_1080p.mp4'
+def dividingIntoScenes(videoPath, sampling, tabOfScenesTimestamps):
+    scenes = []
+    vidcap = cv2.VideoCapture(videoPath)
+
+    fps = vidcap.get(cv2.CAP_PROP_FPS)
+    frame_count = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration = frame_count / fps
+
+    success, frame = vidcap.read()
+    success = True
+
+    shift = 0.25
+    for k in range(len(tabOfScenesTimestamps)):
+        scene = []
+        i = tabOfScenesTimestamps[k] + shift
+        if (k == len(tabOfScenesTimestamps) - 1):
+            endTimestamp = duration
+        else:
+            endTimestamp = tabOfScenesTimestamps[k + 1]
+        while i < endTimestamp:
+            vidcap.set(cv2.CAP_PROP_POS_MSEC, i * 1000)
+            success, frame = vidcap.read()
+            if success:
+                scene.append(frame[..., ::-1])
+                #plt.imshow(frame[..., ::-1])
+                #plt.show()
+            else:
+                raise Exception
+            print("scene num:", k + 1, "\tframe timestamp:", i)
+            i += sampling
+        scenes.append(scene)
+
+    return (scenes, duration)
+
+def main(videoPath, sampling=1.0, tabOfScenesTimestamps=[]):
+    if tabOfScenesTimestamps != []:
+        scenes, duration = dividingIntoScenes(videoPath, sampling, tabOfScenesTimestamps)
+        scenes_d = []
+        for scene in scenes:
+            frames = toGrayscaleAndNormalize(scene)
+            scenes_d.append(measureDistance(frames))
+        print("mean internal scenes distance: ", scenes_d)
+
+        transitions = []
+        for k, scene in enumerate(scenes):
+            if(k == 0):
+                transitions.append(scene[-1])
+            elif(k == len(scenes) - 1):
+                transitions.append(scene[0])
+            else:
+                transitions.append(scene[-1])
+                transitions.append(scene[0])
+
+        for frame in transitions:
+            plt.imshow(frame)
+            plt.show()
+
+        transitions_d = []
+        for k in range(0, len(transitions), 2):
+            frames = toGrayscaleAndNormalize([transitions[k], transitions[k+1]])
+            transitions_d.append(measureDistance(frames))
+        print("distance between individual scenes", transitions_d)
+        sps = len(tabOfScenesTimestamps) / duration # scenes per second
+        print("scenes per second:", sps)
+    else:
+        pass #to-do
+
+videoPath = 'test.mp4'
 numOfFrames = False # jeśli false to domyślnie wyciągana jest z filmu jedna klatka na sekundę
 
-frames1 = extractImages(videoPath, numOfFrames)
 im1 = cv2.imread("1.png")[...,::-1]
 im2 = cv2.imread("2.png")[...,::-1]
 im3 = cv2.imread("3.png")[...,::-1]
 im4 = cv2.imread("4.png")[...,::-1]
 
+"""
 plt.imshow(frames1[0])
 plt.show()
 
@@ -92,22 +102,13 @@ frames2 = [im1, im2]
 frames3 = [im3, im4]
 array = [frames1, frames2, frames3]
 
-"""
 for arr in array:
-    frames = toGrayscale(arr)
-    frames = normalize(frames)
+    frames = toGrayscaleAndNormalize(arr)
     d = measureDistance(frames)
     print(d)
 """
 
-prz1 = toGrayscale(frames2)
-prz2 = arrayToVector(prz1)
-prz3 = normalize(prz2)
-prz4 = measureDistance(prz3)
-print(prz4)
-
-
-
+main(videoPath, sampling=0.5, tabOfScenesTimestamps=[0.0, 3.1, 8.0, 11.75, 13.65])
 
 
 
